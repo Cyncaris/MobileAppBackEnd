@@ -13,7 +13,7 @@ const app = express();
 const jwt = require('jsonwebtoken');
 
 app.use(cors({
-    origin: process.env.FRONTEND_URL,
+    origin: 'https://fyp24s303-app.vercel.app',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
