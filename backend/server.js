@@ -117,7 +117,7 @@ app.post('/api/gen-token', async (req, res) => {
             sameSite: 'strict',  // CSRF protection
             maxAge: 3600000,  // 1 hour in milliseconds
             path: '/',  // Cookie is available for all paths
-            domain: process.env.NODE_ENV === 'production' ? 'yoursite.com' : 'localhost'
+            domain: process.env.NODE_ENV === 'production' ? 'https://fyp24s303-app.vercel.app' : 'localhost'
         });
 
         // Send success response
