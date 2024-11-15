@@ -307,9 +307,14 @@ async function verifySessionId(channel) {
 
 // Verify token middleware
 function verifyToken(req, res, next) {
-    // Check for token in the Authorization header (Bearer scheme)
+    // Check for token in Authorization header (Bearer <token>)
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Extract token after "Bearer "
+    let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+
+    // If token is not in Authorization header, check cookies
+    if (!token) {
+        token = req.cookies.authToken;
+    }
 
     if (!token) {
         return res.status(401).json({ 
@@ -319,7 +324,7 @@ function verifyToken(req, res, next) {
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET); // Use your secret key
+        const decoded = jwt.verify(token, process.env.JWT_SECRET); // Use your JWT secret key
 
         // Attach user info to request object
         req.user = {
@@ -334,6 +339,8 @@ function verifyToken(req, res, next) {
 
     } catch (error) {
         if (error.name === 'TokenExpiredError') {
+            // Clear the cookie if the token has expired
+            res.clearCookie('authToken');
             return res.status(401).json({ 
                 success: false,
                 message: 'Token expired' 
