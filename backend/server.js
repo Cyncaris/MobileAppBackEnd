@@ -309,28 +309,28 @@ async function verifySessionId(channel) {
 
 
 // Verify token middleware
-function verifyToken(req, res, next) {
-    // Check for token in Authorization header (Bearer <token>)
-    const authHeader = req.headers['authorization'];
-    let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
-    console.log("verifyToken reached");
-
-    // If token is not in Authorization header, check cookies
-    if (!token) {
-        token = req.cookies.authToken;
-    }
-
-    if (!token) {
-        return res.status(401).json({ 
-            success: false, 
-            message: 'No token provided' 
-        });
-    }
-
+ffunction verifyToken(req, res, next) {
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET); // Use your JWT secret key
+        const token = req.cookies.authToken || 
+                     (req.headers.authorization?.startsWith('Bearer ') && 
+                      req.headers.authorization.split(' ')[1]);
 
-        // Attach user info to request object
+        if (!token) {
+            return res.status(401).json({ 
+                success: false, 
+                message: 'No token provided' 
+            });
+        }
+
+        if (!process.env.JWT_SECRET) {
+            console.error('JWT_SECRET not configured');
+            return res.status(500).json({
+                success: false,
+                message: 'Server configuration error'
+            });
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = {
             userId: decoded.id,
             username: decoded.username,
@@ -338,13 +338,10 @@ function verifyToken(req, res, next) {
             restricted: decoded.restricted
         };
 
-        // Pass control to next middleware
         next();
-
     } catch (error) {
         if (error.name === 'TokenExpiredError') {
-            // Clear the cookie if the token has expired
-            res.clearCookie('authToken');
+            res.clearCookie('authToken', getCookieOptions());
             return res.status(401).json({ 
                 success: false,
                 message: 'Token expired' 
