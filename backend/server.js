@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const { supabase } = require('./config/supabase');  
 const auth = require('./auth');
 
+
 // Add this debug log to verify Supabase client initialization
 console.log('Supabase client initialized:', !!supabase.from);
 
