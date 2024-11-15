@@ -309,7 +309,7 @@ async function verifySessionId(channel) {
 
 
 // Verify token middleware
-ffunction verifyToken(req, res, next) {
+function verifyToken(req, res, next) {
     try {
         const token = req.cookies.authToken || 
                      (req.headers.authorization?.startsWith('Bearer ') && 
