@@ -310,6 +310,7 @@ function verifyToken(req, res, next) {
     // Check for token in Authorization header (Bearer <token>)
     const authHeader = req.headers['authorization'];
     let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    console.log("verifyToken reached");
 
     // If token is not in Authorization header, check cookies
     if (!token) {
