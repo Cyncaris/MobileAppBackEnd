@@ -173,7 +173,7 @@ app.post('/api/update-token', async (req, res) => {
             sameSite: 'strict',
             maxAge: 3600000,
             path: '/',
-            domain: process.env.NODE_ENV === 'production' ? 'yoursite.com' : 'localhost'
+            domain: process.env.NODE_ENV === 'production' ? 'https://fyp24s303-app.vercel.app' : 'localhost'
         });
 
         return res.status(200).json({
