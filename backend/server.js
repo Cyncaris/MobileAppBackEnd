@@ -80,58 +80,61 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+const getCookieOptions = () => ({
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Changed for cross-origin
+    maxAge: 3600000,
+    path: '/',
+    // Remove hardcoded domain
+});
+
+// Update token generation
 app.post('/api/gen-token', async (req, res) => {
-    const { userId } = req.body;
-    console.log('Received token request:', { userId });
-
-    const user = await getUserById(userId);
-
-    // Validate request body    
-    if ( !userId) {
-        return res.status(400).json({ 
-            success: false,
-            message: 'userId are required' 
-        });
-    }
-
-    // Payload to include in the token
-    const payload = {
-        id: userId,
-        username: user.name,
-        role: user.role_id,
-        restricted: false,  // Added this line
-        iat: Math.floor(Date.now() / 1000), // Issued at time
-    };
-
-    console.log('Signing token for user:', payload);
-
     try {
-        const token = jwt.sign(payload, secretKey, { 
-            expiresIn: '1h'  // 1 hour expiration
-        });
+        const { userId } = req.body;
+        
+        if (!userId) {
+            return res.status(400).json({ 
+                success: false,
+                message: 'userId is required' 
+            });
+        }
 
-        // Set cookie with enhanced security options
-        res.cookie('authToken', token, { 
-            httpOnly: true,  // Prevents JavaScript access
-            secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
-            sameSite: 'strict',  // CSRF protection
-            maxAge: 3600000,  // 1 hour in milliseconds
-            path: '/',  // Cookie is available for all paths
-            domain: process.env.NODE_ENV === 'production' ? 'https://fyp24s303-app.vercel.app' : 'localhost'
-        });
+        const user = await getUserById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
 
-        // Send success response
+        const payload = {
+            id: userId,
+            username: user.name,
+            role: user.role_id,
+            restricted: false,
+            iat: Math.floor(Date.now() / 1000),
+            exp: Math.floor(Date.now() / 1000) + (60 * 60) // 1 hour
+        };
+
+        const token = jwt.sign(payload, secretKey);
+        res.cookie('authToken', token, getCookieOptions());
+
         return res.status(200).json({ 
             success: true,
             message: 'Token generated successfully',
+            user: {
+                id: userId,
+                username: user.name,
+                role: user.role_id
+            }
         });
-
     } catch (error) {
         console.error('Token generation error:', error);
         return res.status(500).json({ 
             success: false,
-            message: 'Error generating token',
-            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+            message: 'Error generating token'
         });
     }
 });
