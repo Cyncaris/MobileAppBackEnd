@@ -3,13 +3,26 @@ const Pusher = require('pusher');
 const cors = require('cors');
 require('dotenv').config();
 const cookieParser = require('cookie-parser');
-const { supabase } = require('./config/supabase');  
+const { supabase } = require('./config/supabase');
 const auth = require('./auth');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 console.log('Supabase client initialized:', !!supabase.from);
 
 const app = express();
 const jwt = require('jsonwebtoken');
+
+app.use(helmet());
+app.use(cookieParser(process.env.COOKIE_SECRET));
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100
+});
+
+const fs = require('fs');
 
 app.use(cors({
     origin: process.env.FRONTEND_URL,
@@ -29,26 +42,23 @@ const pusher = new Pusher({
     useTLS: true,
 });
 
+// Read keys
+const privateKey = fs.readFileSync('private.pem', 'utf8');
+const publicKey = fs.readFileSync('public.pem', 'utf8');
+
 const secretKey = process.env.JWT_SECRET;
 if (!secretKey) {
     console.error('JWT_SECRET is missing in environment variables');
     process.exit(1); // Exit if JWT_SECRET is not set
 }
 
-// Get consistent cookie options
-const getCookieOptions = () => {
-    const options = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 3600000, // 1 hour
-        path: '/'
-    };
-    if (process.env.COOKIE_DOMAIN) {
-        options.domain = process.env.COOKIE_DOMAIN; // Only set if COOKIE_DOMAIN is defined
-    }
-    return options;
-};
+const getCookieOptions = () => ({
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 3600000,
+    path: '/',
+});
 
 // QR authentication endpoint
 app.post('/api/login', async (req, res) => {
@@ -84,7 +94,27 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// Token generation endpoint
+// Enhanced token generation
+const generateToken = (payload) => {
+    const tokenPayload = {
+        ...payload,
+        nonce: require('crypto').randomBytes(16).toString('hex')
+    };
+    // Remove exp if it exists since we're setting it in sign options
+    delete tokenPayload.exp;
+
+    return jwt.sign(
+        tokenPayload,
+        privateKey,
+        {
+            algorithm: 'RS256',
+            expiresIn: '1h',
+            jwtid: require('crypto').randomBytes(16).toString('hex')
+        }
+    );
+};
+
+// Update gen-token endpoint to use this function
 app.post('/api/gen-token', async (req, res) => {
     try {
         const { userId } = req.body;
@@ -102,14 +132,13 @@ app.post('/api/gen-token', async (req, res) => {
             username: user.name,
             role: user.role_id,
             restricted: false,
-            iat: Math.floor(Date.now() / 1000),
-            exp: Math.floor(Date.now() / 1000) + (60 * 60) // 1 hour
+            iat: Math.floor(Date.now() / 1000)
         };
 
-        const token = jwt.sign(payload, secretKey);
+        const token = generateToken(payload);
         res.cookie('authToken', token, getCookieOptions());
 
-        return res.status(200).json({ 
+        return res.status(200).json({
             success: true,
             message: 'Token generated successfully',
             user: { id: userId, username: user.name, role: user.role_id }
@@ -120,6 +149,7 @@ app.post('/api/gen-token', async (req, res) => {
     }
 });
 
+
 // Token update endpoint
 app.post('/api/update-token', async (req, res) => {
     const currentToken = req.cookies.authToken;
@@ -128,11 +158,23 @@ app.post('/api/update-token', async (req, res) => {
     }
 
     try {
-        const decoded = jwt.verify(currentToken, secretKey);
-        const newPayload = { ...decoded, restricted: true, iat: Math.floor(Date.now() / 1000) };
+        // Verify with public key
+        const decoded = jwt.verify(currentToken, publicKey, { algorithms: ['RS256'] });
+
+        const newPayload = {
+            ...decoded,
+            restricted: true,
+            iat: Math.floor(Date.now() / 1000),
+            nonce: require('crypto').randomBytes(32).toString('hex')
+        };
         delete newPayload.exp;
 
-        const newToken = jwt.sign(newPayload, secretKey, { expiresIn: '1h' });
+        // Sign with private key
+        const newToken = jwt.sign(newPayload, privateKey, {
+            algorithm: 'RS256',
+            expiresIn: '1h'
+        });
+
         res.cookie('authToken', newToken, getCookieOptions());
 
         return res.status(200).json({ success: true, message: 'Token updated successfully' });
@@ -173,18 +215,31 @@ async function verifySessionId(channel) {
     }
 }
 
-// Verify token middleware
+// Update token verification middleware
 function verifyToken(req, res, next) {
     try {
-        const token = req.cookies.authToken || 
-                     (req.headers.authorization?.startsWith('Bearer ') && req.headers.authorization.split(' ')[1]);
+        const token = req.cookies.authToken || req.headers.authorization?.replace('Bearer ', '');
 
-        if (!token) return res.status(401).json({ success: false, message: 'No token provided' });
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'No token provided' });
+        }
 
-        const decoded = jwt.verify(token, secretKey);
-        req.user = { userId: decoded.id, username: decoded.username, role: decoded.role, restricted: decoded.restricted };
-        next();
+        jwt.verify(token, publicKey, { algorithms: ['RS256'] }, (err, payload) => {
+            if (err) return res.sendStatus(403);
+            req.user = payload;
+            next();
+        });
+
+
+        // req.user = {
+        //     userId: decoded.id,
+        //     username: decoded.username,
+        //     role: decoded.role,
+        //     restricted: decoded.restricted
+        // };
+        // next();
     } catch (error) {
+        console.error('Token verification error:', error);
         if (error.name === 'TokenExpiredError') {
             res.clearCookie('authToken', getCookieOptions());
             return res.status(401).json({ success: false, message: 'Token expired' });
@@ -192,6 +247,7 @@ function verifyToken(req, res, next) {
         return res.status(401).json({ success: false, message: 'Invalid token' });
     }
 }
+
 
 // Route for token verification
 app.get('/api/verify-token', verifyToken, (req, res) => {
@@ -204,9 +260,39 @@ app.get('/protected', verifyToken, (req, res) => {
 });
 
 app.post('/logout', (req, res) => {
-    res.clearCookie('authToken', getCookieOptions());
-    console.log('Logged out successfully');
-    res.json({ success: true, message: "Logged out successfully" });
+    try {
+        // Clear cookie with matching settings
+        res.clearCookie('authToken', {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+            path: '/',
+            domain: process.env.COOKIE_DOMAIN || undefined,  // Must match the domain used to set the cookie
+            expires: new Date(0), // Forces immediate expiration
+            maxAge: 0 // Also force immediate expiration
+        });
+
+        // Clear any other related cookies if they exist
+        res.clearCookie('authToken', {
+            path: '/',
+            domain: undefined
+        });
+
+        // Clear cookie without any options as fallback
+        res.clearCookie('authToken');
+
+        console.log('Logged out successfully');
+        res.status(200).json({
+            success: true,
+            message: "Logged out successfully"
+        });
+    } catch (error) {
+        console.error('Logout error:', error);
+        res.status(500).json({
+            success: false,
+            message: "Error during logout"
+        });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
