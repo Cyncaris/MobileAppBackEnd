@@ -43,8 +43,8 @@ const pusher = new Pusher({
 });
 
 // Read keys
-const privateKey = fs.readFileSync('private.pem', 'utf8');
-const publicKey = fs.readFileSync('public.pem', 'utf8');
+const privateKey = process.env.PRIVATE_KEY.replace(/\\n/g, '\n');
+const publicKey = process.env.PUBLIC_KEY.replace(/\\n/g, '\n');
 
 const secretKey = process.env.JWT_SECRET;
 if (!secretKey) {
